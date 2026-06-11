@@ -1,8 +1,8 @@
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Search, Download, Plus, X, Trash2, Camera, Scan, Activity, ArrowRightCircle, ArrowLeftCircle, AlertTriangle } from 'lucide-react';
 import { useAppData } from '../context/AppDataContext';
 import { supabase } from '../lib/supabase';
-
+import { Html5Qrcode } from 'html5-qrcode';
 import * as XLSX from 'xlsx';
 
 export const Inventory: React.FC = () => {
@@ -16,34 +16,43 @@ export const Inventory: React.FC = () => {
   const [movementDateFilter, setMovementDateFilter] = useState('');
   const [showEditModal, setShowEditModal] = useState(false);
   const [showScanner, setShowScanner] = useState(false);
-  const [cameraError, setCameraError] = useState<string | null>(null);
   const [traceLot, setTraceLot] = useState<{sku: string, lot: string, name: string} | null>(null);
-  const videoRef = useRef<HTMLVideoElement>(null);
   const [editData, setEditData] = useState({ sku: '', name: '', qty: '', type: 'Entrada' as 'Entrada' | 'Salida' | 'Merma', reason: '' });
 
   useEffect(() => {
-    let stream: MediaStream | null = null;
+    let html5QrCode: any = null;
     if (showScanner) {
-      setCameraError(null);
-      if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
-        navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } })
-          .then(s => {
-            stream = s;
-            if (videoRef.current) {
-              videoRef.current.srcObject = stream;
+      setTimeout(() => {
+        html5QrCode = new Html5Qrcode("reader");
+        html5QrCode.start(
+          { facingMode: "environment" },
+          { fps: 10, qrbox: { width: 250, height: 250 } },
+          (decodedText: string) => {
+            setSearchTerm(decodedText);
+            if(html5QrCode && html5QrCode.isScanning) {
+              html5QrCode.stop().then(() => {
+                html5QrCode.clear();
+                setShowScanner(false);
+              }).catch((e:any) => console.log(e));
+            } else {
+              setShowScanner(false);
             }
-          })
-          .catch(err => {
-            console.log('Error accediendo a cámara: ', err);
-            setCameraError('No se detectó cámara o falta dar permisos en el navegador.');
-          });
-      } else {
-        setCameraError('Tu navegador no soporta cámara o no estás usando conexión segura (HTTPS/Localhost).');
-      }
+          },
+          (_error: any) => {
+            // ignore
+          }
+        ).catch((err: any) => {
+          console.error("Error starting scanner", err);
+          alert("Error al iniciar cámara: Asegúrate de tener cámara web y permisos otorgados.");
+        });
+      }, 100);
+
+      return () => {
+        if (html5QrCode && html5QrCode.isScanning) {
+          html5QrCode.stop().then(() => html5QrCode.clear()).catch((e:any) => console.log(e));
+        }
+      };
     }
-    return () => {
-      if (stream) stream.getTracks().forEach(track => track.stop());
-    };
   }, [showScanner]);
 
   const handleSimulatedScan = () => {
@@ -318,6 +327,21 @@ export const Inventory: React.FC = () => {
                       >
                         <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path></svg>
                       </button>
+                      {(item.status === 'Bajo Stock' || item.status === 'Próximo a Vencer' || item.status === 'Vencido') && (
+                        <button 
+                          onClick={() => {
+                            const encPhone = prompt("Ingrese el número de celular del encargado de Bodega (Ej: 71234567):");
+                            if(encPhone) {
+                              const msg = `*ALERTA DE INVENTARIO - PIL*%0A%0AProducto: ${item.name}%0ASKU: ${item.sku}%0ACantidad actual: ${item.qty} ${item.unit}%0AEstado: ${item.status}%0A%0APor favor gestionar inmediatamente.`;
+                              window.open(`https://wa.me/591${encPhone.replace(/\s+/g,'')}?text=${msg}`, '_blank');
+                            }
+                          }}
+                          className="p-1.5 text-green-500 hover:text-green-700 hover:bg-green-50 rounded transition-colors"
+                          title="Notificar por WhatsApp a Bodega"
+                        >
+                          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92z"></path></svg>
+                        </button>
+                      )}
                       {loggedInUser?.role !== 'Operario' && (
                         <button 
                           onClick={() => {
@@ -488,26 +512,14 @@ export const Inventory: React.FC = () => {
             </div>
             
             <div className="p-6 flex flex-col items-center">
-              <div className="w-64 h-64 bg-slate-800 rounded-2xl overflow-hidden relative border-4 border-slate-200 mb-6 flex items-center justify-center">
-                {cameraError ? (
-                  <div className="text-center p-4">
-                    <AlertTriangle className="text-rose-500 mx-auto mb-2" size={32} />
-                    <p className="text-xs text-slate-300">{cameraError}</p>
-                  </div>
-                ) : (
-                  <>
-                    <video ref={videoRef} autoPlay playsInline muted className="w-full h-full object-cover" />
-                    <div className="absolute inset-0 border-2 border-[#3776BC]/50 m-8 rounded-lg pointer-events-none flex items-center justify-center">
-                      <div className="w-full h-0.5 bg-rose-500/80 shadow-[0_0_8px_rgba(244,63,94,0.8)] animate-[scan_2s_ease-in-out_infinite]"></div>
-                    </div>
-                  </>
-                )}
-              </div>
-              <p className="text-sm text-slate-500 text-center mb-6">Apunta la cámara al código de barras o QR del producto.</p>
+              <div id="reader" className="w-full bg-black rounded-lg overflow-hidden border-2 border-slate-300"></div>
+              <p className="text-center text-xs text-slate-500 mt-4 font-semibold">
+                Apunta la cámara al código de barras del producto.
+              </p>
               
               <button 
                 onClick={handleSimulatedScan}
-                className="w-full py-3 bg-[#3776BC] text-white rounded-lg font-bold shadow-md hover:bg-blue-800 transition-colors"
+                className="w-full mt-6 py-3 bg-[#3776BC] text-white rounded-lg font-bold shadow-md hover:bg-blue-800 transition-colors"
               >
                 Simular Detección Exitosa
               </button>

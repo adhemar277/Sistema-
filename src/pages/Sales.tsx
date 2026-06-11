@@ -3,9 +3,10 @@ import { ShoppingCart, Download, Plus, X, TrendingUp, FileText, Clock, Truck, Se
 import { QRCodeSVG } from 'qrcode.react';
 import { useAppData } from "../context/AppDataContext";
 import { PaymentGateway } from '../services/paymentGatewayMock';
+import { Html5Qrcode } from 'html5-qrcode';
 
 export const Sales: React.FC = () => {
-  const { inventory, sales, addSale, loggedInUser, branches, activeBranchId, cashRegisters, addAuditLog } = useAppData();
+  const { inventory, sales, addSale, loggedInUser, branches, activeBranchId, cashRegisters, addAuditLog, fetchData } = useAppData();
   const [client, setClient] = useState("");
   const [selectedSku, setSelectedSku] = useState("");
   const [qty, setQty] = useState("1");
@@ -26,6 +27,7 @@ export const Sales: React.FC = () => {
   const [billingType, setBillingType] = useState<"Con Recibo" | "Con Factura" | "Sin Comprobante">("Con Recibo");
   const [nitCi, setNitCi] = useState("");
   const [razonSocial, setRazonSocial] = useState("");
+  const [showScanner, setShowScanner] = useState(false);
 
   const [barcodeBuffer, setBarcodeBuffer] = useState("");
   
@@ -78,6 +80,57 @@ export const Sales: React.FC = () => {
       clearTimeout(timeout);
     };
   }, [barcodeBuffer, inventory]);
+
+  useEffect(() => {
+    let html5QrCode: any = null;
+    if (showScanner) {
+      setTimeout(() => {
+        html5QrCode = new Html5Qrcode("reader");
+        html5QrCode.start(
+          { facingMode: "environment" },
+          { fps: 10, qrbox: { width: 250, height: 250 } },
+          (decodedText: string) => {
+            const found = inventory.find(i => i.sku === decodedText);
+            if (found) {
+              setSelectedSku(found.sku);
+              setCart(prev => {
+                const existing = prev.find(item => item.sku === found.sku);
+                if (existing) {
+                  return prev.map(item => item.sku === found.sku ? { ...item, qty: item.qty + 1 } : item);
+                }
+                return [...prev, { sku: found.sku, name: found.name, qty: 1, price: found.price, status: 'Preparando' }];
+              });
+              setToast({ show: true, message: `¡Escaneado: ${found.name}!`, type: 'success' });
+              setTimeout(() => setToast(null), 3000);
+            } else {
+              setToast({ show: true, message: `No encontrado: ${decodedText}`, type: 'error' });
+              setTimeout(() => setToast(null), 3000);
+            }
+            if(html5QrCode && html5QrCode.isScanning) {
+              html5QrCode.stop().then(() => {
+                html5QrCode.clear();
+                setShowScanner(false);
+              }).catch((e:any) => console.log(e));
+            } else {
+              setShowScanner(false);
+            }
+          },
+          (_error: any) => {
+            // ignore
+          }
+        ).catch((err: any) => {
+          console.error("Error starting scanner", err);
+          alert("Error al iniciar cámara: Asegúrate de tener cámara web y permisos otorgados.");
+        });
+      }, 100);
+
+      return () => {
+        if (html5QrCode && html5QrCode.isScanning) {
+          html5QrCode.stop().then(() => html5QrCode.clear()).catch((e:any) => console.log(e));
+        }
+      };
+    }
+  }, [showScanner, inventory]);
 
   const [showTicketModal, setShowTicketModal] = useState(false);
   const [ticketSale, setTicketSale] = useState<any | null>(null);
@@ -568,7 +621,8 @@ export const Sales: React.FC = () => {
                     }]);
                     await addAuditLog('Apertura de Caja', `Caja abierta con Bs. ${openingBalance}`);
                     alert('Caja abierta correctamente');
-                    window.location.reload(); // Para que el fetchData vuelva a cargar la caja abierta
+                    if (fetchData) await fetchData();
+                    setShowCashRegisterModal(false);
                   } catch (err: any) {
                     alert('Error al abrir caja. ' + err.message);
                   }
@@ -610,15 +664,23 @@ export const Sales: React.FC = () => {
             <div className="mb-4 bg-slate-50 p-4 rounded-xl border border-slate-200">
               <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2 mb-4">
                 <label className="block text-sm font-bold text-slate-700 uppercase">Seleccionar Producto</label>
-                <div className="relative w-full sm:w-72">
-                  <Search className="absolute left-3 top-2.5 text-slate-400" size={16} />
-                  <input 
-                    type="text" 
-                    placeholder="Buscar por nombre, SKU..." 
-                    value={productSearch}
-                    onChange={e => setProductSearch(e.target.value)}
-                    className="w-full pl-9 pr-3 py-2 bg-white border border-slate-200 rounded-xl text-sm focus:outline-none focus:border-[#3776BC] focus:ring-1 focus:ring-[#3776BC]" 
-                  />
+                <div className="flex gap-2 w-full sm:w-auto flex-1">
+                  <div className="relative flex-1">
+                    <Search className="absolute left-3 top-2.5 text-slate-400" size={16} />
+                    <input 
+                      type="text" 
+                      placeholder="Buscar por nombre, SKU..." 
+                      value={productSearch}
+                      onChange={e => setProductSearch(e.target.value)}
+                      className="w-full pl-9 pr-3 py-2 bg-white border border-slate-200 rounded-xl text-sm focus:outline-none focus:border-[#3776BC] focus:ring-1 focus:ring-[#3776BC]" 
+                    />
+                  </div>
+                  <button 
+                    onClick={() => setShowScanner(true)}
+                    className="flex items-center gap-2 bg-slate-800 text-white px-3 py-2 rounded-xl text-sm font-bold hover:bg-slate-900 transition-colors shadow-sm whitespace-nowrap"
+                  >
+                    📷 Escanear
+                  </button>
                 </div>
               </div>
               
@@ -1127,7 +1189,7 @@ export const Sales: React.FC = () => {
             
             <div className="p-6 bg-slate-100/50 max-h-[60vh] overflow-y-auto custom-scrollbar flex flex-col justify-start">
               {/* Receipt Preview */}
-              <div className="bg-white p-5 rounded-xl shadow-md border border-slate-200/80 max-w-[290px] mx-auto font-mono text-[11px] text-slate-900 flex flex-col gap-2 relative">
+              <div id="ticket-preview" className="bg-white p-5 rounded-xl shadow-md border border-slate-200/80 max-w-[290px] mx-auto font-mono text-[11px] text-slate-900 flex flex-col gap-2 relative">
                 {/* Paper header dots decoration */}
                 <div className="absolute -top-1 left-0 right-0 h-1 bg-[radial-gradient(#cbd5e1_1px,transparent_1px)] [background-size:6px_6px]"></div>
                 
@@ -1227,6 +1289,31 @@ export const Sales: React.FC = () => {
               >
                 🖨️ Imprimir Ticket (80mm)
               </button>
+              <div className="flex gap-2 w-full mt-2">
+                <button 
+                  onClick={async () => {
+                    const el = document.getElementById("ticket-preview");
+                    if(el) {
+                      try {
+                        const html2canvas = (await import('html2canvas')).default;
+                        const canvas = await html2canvas(el, { backgroundColor: '#ffffff' });
+                        const dataUrl = canvas.toDataURL('image/png');
+                        const link = document.createElement('a');
+                        link.download = `Ticket_Venta.png`;
+                        link.href = dataUrl;
+                        link.click();
+                      } catch(e) {
+                        console.error(e);
+                        alert("Error al generar imagen");
+                      }
+                    }
+                  }}
+                  className="w-full justify-center px-3 py-2 bg-green-600 text-white rounded-lg text-xs font-bold hover:bg-green-700 transition-colors shadow-sm flex items-center gap-2 cursor-pointer border-0"
+                >
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg>
+                  Descargar Imagen para WhatsApp
+                </button>
+              </div>
               <button 
                 onClick={() => {
                   setShowTicketModal(false);
@@ -1242,6 +1329,25 @@ export const Sales: React.FC = () => {
         </div>
       )}
 
+      {/* Camera Scanner Modal */}
+      {showScanner && (
+        <div className="fixed inset-0 bg-slate-900/80 backdrop-blur-sm z-[9999] flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md overflow-hidden animate-in zoom-in-95 duration-300">
+            <div className="bg-slate-800 p-4 flex justify-between items-center text-white">
+              <h3 className="font-bold flex items-center gap-2"><Search size={18} /> Escáner Móvil</h3>
+              <button onClick={() => setShowScanner(false)} className="text-slate-400 hover:text-white transition-colors">
+                <X size={24} />
+              </button>
+            </div>
+            <div className="p-4 bg-slate-100">
+              <div id="reader" className="w-full bg-black rounded-lg overflow-hidden border-2 border-slate-300"></div>
+              <p className="text-center text-xs text-slate-500 mt-4 font-semibold">
+                Apunta la cámara al código de barras del producto.
+              </p>
+            </div>
+          </div>
+        </div>
+      )}
       {/* Floating Toast Notification */}
       {toast && (
         <div className="fixed bottom-6 right-6 z-[99999] bg-emerald-600 text-white px-5 py-4 rounded-2xl shadow-2xl flex items-center gap-3.5 animate-in slide-in-from-bottom-6 duration-300 border border-emerald-500/20">

@@ -5,7 +5,7 @@ import {
   CheckCircle, AlertCircle, Plus, Search, Printer, X, Calendar, Table as TableIcon, Trash2
 } from 'lucide-react';
 import * as XLSX from 'xlsx';
-import { supabase } from '../lib/supabase';
+
 
 export const Payrolls: React.FC = () => {
   const { payrolls, users, addPayroll, updatePayroll, deletePayroll, selectedBranchId, loggedInUser, attendances, updateAttendance, fetchData } = useAppData();
@@ -893,10 +893,12 @@ export const Payrolls: React.FC = () => {
                 
                 const allWorkers = Array.from(workersMap.values());
 
+                let hasError = false;
                 for (const w of allWorkers) {
                   const exist = attendances.find(a => a.employee_id === w.id && a.period_month === mStr && a.period_year === yStr);
                   if (!exist) {
-                    await supabase.from('attendance').insert({
+                    const { supabase } = await import('../lib/supabase');
+                    const { error } = await supabase.from('attendance').insert({
                       employee_id: w.id,
                       employee_name: w.name,
                       period_month: mStr,
@@ -906,10 +908,18 @@ export const Payrolls: React.FC = () => {
                       unjustified_absences: 0,
                       branch_id: w.branch_id
                     });
+                    if (error) {
+                      console.error("Error insertando asistencia:", error);
+                      alert('Error de base de datos: ' + error.message + '\nPor favor asegúrate de ejecutar el código SQL para crear la tabla attendance.');
+                      hasError = true;
+                      break;
+                    }
                   }
                 }
-                alert(`Asistencias sincronizadas para ${monthFilter}`);
-                if (fetchData) await fetchData();
+                if (!hasError) {
+                  alert(`Asistencias sincronizadas para ${monthFilter}`);
+                  if (fetchData) await fetchData();
+                }
               }}
               className="bg-indigo-50 text-[#3776BC] px-4 py-2 rounded-xl text-sm font-bold hover:bg-indigo-100 transition-colors"
             >

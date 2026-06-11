@@ -1,8 +1,8 @@
 import React, { useState } from 'react';
 import { Package, AlertTriangle, ArrowRightLeft, TrendingUp, X, DollarSign } from 'lucide-react';
-import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend } from 'recharts';
-import { IAInsights } from '../components/dashboard/IAInsights';
+import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend, PieChart, Pie, Cell } from 'recharts';
 import { useAppData } from '../context/AppDataContext';
+import { IAInsights } from '../components/dashboard/IAInsights';
 
 export const Dashboard: React.FC = () => {
   const { inventory, movements, payrolls, sales, purchases, activeBranchId, branches, seedDatabase, loading } = useAppData();
@@ -18,24 +18,6 @@ export const Dashboard: React.FC = () => {
   const totalPayrolls = payrolls
     .filter(p => `${p.period_month} ${p.period_year}` === currentMonthFilter)
     .reduce((sum, p) => sum + p.net_pay, 0);
-
-  // Calculate chart data for last 7 days
-  const last7Days = Array.from({ length: 7 }).map((_, i) => {
-    const d = new Date();
-    d.setDate(d.getDate() - (6 - i));
-    return d;
-  });
-
-  const chartData = last7Days.map(date => {
-    const dayMovs = movements.filter(m => new Date(m.date).toDateString() === date.toDateString());
-    const entradas = dayMovs.filter(m => m.type === 'Entrada').reduce((acc, m) => acc + m.qty, 0);
-    const salidas = dayMovs.filter(m => m.type === 'Salida' || m.type === 'Merma').reduce((acc, m) => acc + m.qty, 0);
-    return {
-      name: date.toLocaleDateString('es-BO', { weekday: 'short' }).charAt(0).toUpperCase() + date.toLocaleDateString('es-BO', { weekday: 'short' }).slice(1),
-      Entradas: entradas,
-      Salidas: salidas
-    };
-  });
 
   const movsDiarios = movements.filter(m => new Date(m.date).toDateString() === new Date().toDateString()).length;
 
@@ -232,34 +214,60 @@ export const Dashboard: React.FC = () => {
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 flex-1 min-h-0">
-        {/* Main Chart */}
+        {/* Gráfico 1: Top 5 Productos Rentables */}
         <div className="col-span-1 lg:col-span-2 bg-white rounded-xl shadow-sm border border-slate-200 p-4 md:p-6 flex flex-col h-[350px] md:h-[500px]">
           <div className="flex justify-between items-center mb-6">
-            <h3 className="text-lg font-bold text-slate-800">Entradas vs Salidas (Últimos 7 Días)</h3>
-            <button className="text-slate-400 hover:text-slate-600">
-              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="1"/><circle cx="12" cy="5" r="1"/><circle cx="12" cy="19" r="1"/></svg>
-            </button>
+            <h3 className="text-lg font-bold text-slate-800 flex items-center gap-2">
+              <TrendingUp size={18} className="text-[#3776BC]" /> Top Productos Rentables
+            </h3>
+            <span className="text-[10px] font-black uppercase tracking-wider bg-indigo-50 text-[#3776BC] px-2 py-1 rounded-md">BI Dashboard</span>
           </div>
           <div className="flex-1 min-h-0">
             <ResponsiveContainer width="100%" height="100%">
-              <BarChart data={chartData} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
-                <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#E2E8F0" />
-                <XAxis dataKey="name" axisLine={false} tickLine={false} tick={{fill: '#64748B', fontSize: 12}} dy={10} />
-                <YAxis axisLine={false} tickLine={false} tick={{fill: '#64748B', fontSize: 12}} />
-                <Tooltip 
-                  cursor={{fill: '#F1F5F9'}}
-                  contentStyle={{borderRadius: '8px', border: 'none', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)'}}
-                />
-                <Legend iconType="square" wrapperStyle={{paddingTop: '20px', fontSize: '12px', fontWeight: 600, color: '#475569'}} />
-                <Bar dataKey="Entradas" fill="#1E3A8A" radius={[2, 2, 0, 0]} barSize={40} />
-                <Bar dataKey="Salidas" fill="#CBD5E1" radius={[2, 2, 0, 0]} barSize={40} />
+              <BarChart data={(() => {
+                return inventory.map(item => {
+                  const costo = item.price * 0.7; // Asumimos un 30% de margen
+                  const ventasItem = sales.filter(s => s.product_sku === item.sku);
+                  const cantVendida = ventasItem.reduce((sum, s) => sum + s.qty, 0);
+                  const ganancia = (item.price - costo) * cantVendida;
+                  return { name: item.name, Ganancia: ganancia };
+                }).filter(d => d.Ganancia > 0).sort((a, b) => b.Ganancia - a.Ganancia).slice(0, 5);
+              })()} layout="vertical" margin={{ top: 5, right: 30, left: 20, bottom: 5 }}>
+                <CartesianGrid strokeDasharray="3 3" horizontal={true} vertical={false} stroke="#E2E8F0" />
+                <XAxis type="number" axisLine={false} tickLine={false} tick={{fill: '#64748B', fontSize: 12}} />
+                <YAxis dataKey="name" type="category" width={120} axisLine={false} tickLine={false} tick={{fill: '#475569', fontSize: 11, fontWeight: 600}} />
+                <Tooltip cursor={{fill: '#F8FAFC'}} contentStyle={{borderRadius: '8px', border: 'none', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)'}} />
+                <Bar dataKey="Ganancia" fill="#3776BC" radius={[0, 4, 4, 0]} barSize={20} />
               </BarChart>
             </ResponsiveContainer>
           </div>
         </div>
 
-        {/* AI Insights & Recent Alerts Sidebar */}
+        {/* Gráfico 2: Ventas por Sucursal y Proyección */}
         <div className="col-span-1 flex flex-col gap-6">
+          <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-5 flex flex-col h-[250px]">
+            <h3 className="text-sm font-bold text-slate-800 mb-2">Ventas por Sucursal</h3>
+            <div className="flex-1 min-h-0 relative">
+              <ResponsiveContainer width="100%" height="100%">
+                <PieChart>
+                  <Pie
+                    data={(() => {
+                      return branches.map(b => {
+                        const total = sales.filter(s => s.branch_id === b.id).reduce((sum, s) => sum + s.total, 0);
+                        return { name: b.name.split(' - ')[0], value: total };
+                      }).filter(d => d.value > 0);
+                    })()}
+                    cx="50%" cy="50%" innerRadius={40} outerRadius={70} paddingAngle={5} dataKey="value"
+                  >
+                    {branches.map((_, index) => <Cell key={`cell-${index}`} fill={['#3776BC', '#10B981', '#F59E0B', '#8B5CF6'][index % 4]} />)}
+                  </Pie>
+                  <Tooltip formatter={(value: number) => `Bs. ${value.toFixed(2)}`} />
+                  <Legend verticalAlign="bottom" height={36} iconType="circle" wrapperStyle={{fontSize: '11px'}} />
+                </PieChart>
+              </ResponsiveContainer>
+            </div>
+          </div>
+          
           <div className="flex-1 min-h-0">
             <IAInsights />
           </div>
